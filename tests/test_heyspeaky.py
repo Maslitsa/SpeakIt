@@ -1431,14 +1431,48 @@ class PersonalDictionary(unittest.TestCase):
         entries = dictionary.add(self.WRONG, self.NAME, entries=[])
         self.assertEqual(dictionary.words(entries), [self.NAME])
 
+    def twice(self, heard, meant, entries=None):
+        entries = dictionary.add(heard, meant, entries=entries or [])
+        return dictionary.add(heard, meant, entries=entries)
+
     def test_what_was_heard_is_replaced_by_what_was_meant(self):
-        entries = dictionary.add(self.WRONG, self.NAME, entries=[])
+        entries = self.twice(self.WRONG, self.NAME)
         said = "{}, мен сені "               "сүйем.".format(self.WRONG)
         self.assertIn(self.NAME, dictionary.apply(said, entries))
         self.assertNotIn(self.WRONG, dictionary.apply(said, entries))
 
+    def test_one_correction_to_a_different_word_is_only_a_hint(self):
+        """The owner's example: "Всем привет" was written for his name.
+        Replaced from the first correction, every "всем привет" he said
+        after would have become his name."""
+        entries = dictionary.add("Всем привет", "Усенов Мирас", entries=[])
+        self.assertEqual(dictionary.apply("Всем привет, друзья!", entries),
+                         "Всем привет, друзья!")
+        self.assertEqual(dictionary.words(entries), ["Усенов Мирас"])
+        again = dictionary.add("Всем привет", "Усенов Мирас", entries=entries)
+        self.assertEqual(dictionary.apply("Всем привет, друзья!", again),
+                         "Усенов Мирас, друзья!")
+
+    def test_the_same_word_spelled_another_way_is_fixed_at_once(self):
+        """A Kazakh letter written as its Russian look-alike is a spelling,
+        not another word, and needs no second correction - and it is fixed
+        for any word somebody meant, corrected or only declared."""
+        entries = dictionary.add("Магжан", self.NAME, entries=[])
+        self.assertEqual(dictionary.apply("Привет, Магжан!", entries),
+                         "Привет, {}!".format(self.NAME))
+        declared = dictionary.add("", "Әйгерім", entries=[])
+        self.assertEqual(dictionary.apply("айгерим пришла", declared),
+                         "Әйгерім пришла")
+        self.assertEqual(dictionary.apply("Айгерим пришла", declared),
+                         "Әйгерім пришла")
+
+    def test_a_word_that_differs_only_in_case_is_left_as_written(self):
+        entries = dictionary.add("Ноушен", "Notion", entries=[])
+        self.assertEqual(dictionary.apply("a notion of it", entries),
+                         "a notion of it")
+
     def test_only_whole_words_are_replaced(self):
-        entries = dictionary.add("cat", "cot", entries=[])
+        entries = self.twice("cat", "cot")
         self.assertEqual(dictionary.apply("concatenate", entries),
                          "concatenate")
         self.assertEqual(dictionary.apply("the cat.", entries), "the cot.")
@@ -1446,7 +1480,7 @@ class PersonalDictionary(unittest.TestCase):
     def test_a_word_somebody_meant_is_never_replaced_away(self):
         """Two names that sound alike, both real. Correcting one must not
         destroy the other every time it is said."""
-        entries = dictionary.add(self.WRONG, self.NAME, entries=[])
+        entries = self.twice(self.WRONG, self.NAME)
         entries = dictionary.add("", self.WRONG, entries=entries)
         self.assertIn(self.WRONG, dictionary.apply(self.WRONG, entries))
 
@@ -1476,7 +1510,7 @@ class PersonalDictionary(unittest.TestCase):
                          dictionary.KEYWORD_LIMIT)
 
     def test_a_capital_stays_a_capital(self):
-        entries = dictionary.add("marzhan", "magzhan", entries=[])
+        entries = self.twice("marzhan", "magzhan")
         self.assertEqual(dictionary.apply("Marzhan said so", entries),
                          "Magzhan said so")
 

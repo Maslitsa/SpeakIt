@@ -188,6 +188,15 @@ without jargon, and say what you actually did and what you could not do.
   `dictionary.PATH` at an empty file for the whole run, because that file is
   read fresh on every transcription: without it the keyword tests pass on a
   clean CI runner and fail on any machine that has actually used the feature.
+  **One correction is a hint, not a rule.** A pair used to be replaced from
+  its first correction, and the owner saw where that goes: "Всем привет",
+  written for his own name, corrected to "Усенов Мирас", would turn every
+  "всем привет" he said after into his name. A correction to a different
+  word now only primes, and is replaced once the same correction has been
+  made `REPLACE_AFTER` (2) times. The same word spelled another way - a
+  Kazakh letter written as its Russian look-alike, "Магжан" for "Мағжан" -
+  is fixed at once, for every word somebody meant, corrected or declared; a
+  word differing only in case is left alone, because "notion" is a word.
 - **The correction key is Ctrl+Alt+Win, not Ctrl+Alt+Space.** Space was the
   first choice, and on the owner's machine another program owns
   Ctrl+Alt+Space as a global shortcut: it gets the keys first, and a hook

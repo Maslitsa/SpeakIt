@@ -31,6 +31,19 @@ plain JSON on purpose, so it can be read and edited by hand.
 Replacement is deliberately timid. It only ever fires on a pair somebody
 typed, on whole words, and never on a word that is itself something they said
 they meant - otherwise one careless entry could eat a real word for good.
+
+**One correction is a hint, not a rule.** The owner selected "Всем привет",
+which the model had written for his own name, and typed "Усенов Мирас" - and
+saw that it would then turn every "всем привет" he ever said into his name,
+because a pair used to be replaced from its first correction. What was heard
+there is an ordinary phrase, and one correction cannot tell an ordinary phrase
+from a mistake. So a correction to a different word now only primes: the
+meant word goes out with the audio, and the pair is replaced only once the
+same correction has been made `REPLACE_AFTER` times - the model writing the
+same wrong thing again, hint and all. A correction to the same word spelled
+another way - "Магжан" for "Мағжан", a Kazakh letter the model wrote as its
+Russian look-alike - is a spelling, and it is fixed from the start, wherever
+the model writes any word the person has said they meant that way.
 """
 
 import json
@@ -57,6 +70,19 @@ LEGACY_PATHS = (
 # every time. Most recently corrected first: what someone is fixing today is
 # what they are saying today.
 KEYWORD_LIMIT = 48
+
+# How many times the same correction to a different word is made before the
+# pair is replaced rather than only listened for. See the top of the file.
+REPLACE_AFTER = 2
+
+# The Kazakh letters and the Russian ones the model writes for them. A name
+# spelled with either is the same name; `_any_spelling` matches both ways.
+_KAZAKH = "қғңәөұүһіё"
+_RUSSIAN = "кгнаоууиие"
+_FOLD = str.maketrans(_KAZAKH, _RUSSIAN)
+_SPELLED_AS = {}
+for _kazakh, _russian in zip(_KAZAKH, _RUSSIAN):
+    _SPELLED_AS[_russian] = _SPELLED_AS.get(_russian, "") + _kazakh
 
 
 def _expand(path):
@@ -168,29 +194,81 @@ def words(entries=None, path=None, limit=KEYWORD_LIMIT):
     return out
 
 
+def _folded(text):
+    """A spelling with the differences that do not make another word taken
+    out: case, and each Kazakh letter as the Russian one it looks like."""
+    return (text or "").casefold().translate(_FOLD)
+
+
+def _any_spelling(word):
+    """A pattern for `word` in any case, each letter matching itself or its
+    Kazakh or Russian look-alike, so "Магжан" and "Мағжан" both match."""
+    parts = []
+    for char in word:
+        if char.isspace():
+            parts.append(r"\s+")
+            continue
+        base = char.lower().translate(_FOLD)
+        variants = {char.lower(), base} | set(_SPELLED_AS.get(base, ""))
+        parts.append("[" + "".join(re.escape(v) for v in sorted(variants))
+                     + "]" if len(variants) > 1 else re.escape(char))
+    return "".join(parts)
+
+
+def _whole(pattern):
+    return re.compile(r"(?<![^\W\d_])" + pattern + r"(?![^\W\d_])",
+                      re.IGNORECASE | re.UNICODE)
+
+
+def replaces(entry):
+    """Whether a correction is replaced after transcription, rather than
+    only listened for: the same word spelled another way at once, and a
+    different word once it has been corrected `REPLACE_AFTER` times."""
+    heard = _clean(entry.get("heard"))
+    meant = _clean(entry.get("meant"))
+    if not heard or not meant or heard == meant:
+        return False
+    if _folded(heard) == _folded(meant):
+        return True
+    return int(entry.get("hits") or 0) >= REPLACE_AFTER
+
+
 def apply(text, entries=None, path=None):
     """Replaces what the model heard with what was meant.
 
     Whole words only, so correcting "Marzhan" never rewrites the middle of
     some longer word, and never a spelling that is itself a correct one -
     a pair that would undo another person's name is dropped rather than
-    guessed at.
+    guessed at. Every word somebody meant is spelled their way wherever the
+    model wrote it with the Kazakh letters' Russian look-alikes; a word that
+    differs only in case is left as the model wrote it, because "notion" is
+    a word as well as "Notion".
     """
     if not text:
         return text
     entries = entries if entries is not None else load(path)
     meanings = set()
+    spellings = []
     for entry in entries:
         meant = _clean(entry.get("meant"))
-        if meant:
+        if meant and meant.casefold() not in meanings:
             meanings.add(meant.casefold())
+            spellings.append(meant)
+
+    # The longest first, so a name of two words is spelled before either
+    # word of it is looked at alone.
+    for meant in sorted(spellings, key=len, reverse=True):
+        text = _whole(_any_spelling(meant)).sub(
+            lambda match, m=meant: match.group(0)
+            if match.group(0).casefold() == m.casefold()
+            else _match_case(match.group(0), m), text)
 
     pairs = []
     seen = set()
     for entry in entries:
         heard = _clean(entry.get("heard"))
         meant = _clean(entry.get("meant"))
-        if not heard or not meant or heard == meant:
+        if not replaces(entry):
             continue
         if heard.casefold() in meanings:
             # Somebody else's correct word. Replacing it would lose a real
@@ -204,11 +282,8 @@ def apply(text, entries=None, path=None):
         pairs.append((heard, meant))
 
     for heard, meant in pairs:
-        pattern = re.compile(
-            r"(?<![^\W\d_])" + re.escape(heard) + r"(?![^\W\d_])",
-            re.IGNORECASE | re.UNICODE)
-        text = pattern.sub(lambda match, m=meant: _match_case(match.group(0),
-                                                              m), text)
+        text = _whole(re.escape(heard)).sub(
+            lambda match, m=meant: _match_case(match.group(0), m), text)
     return text
 
 
