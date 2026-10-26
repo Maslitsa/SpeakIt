@@ -34,7 +34,7 @@ import webrtcvad
 from . import dictionary
 from .languages import NAMES
 
-logger = logging.getLogger("heyspeaky.transcribe")
+logger = logging.getLogger("speakit.transcribe")
 
 
 class CloudUnreachable(RuntimeError):
@@ -114,9 +114,10 @@ CONNECT_TIMEOUT = 4.0
 OFFLINE_MEMO_SECONDS = 20.0
 
 # Where the key lived under the older names, newest first. Only ever read,
-# as a fallback, so nobody has to move a file after updating.
+# as a fallback, so nobody has to move a file after updating. SpeakIt is not
+# among them: it is the current name again, and its folder is the main one.
 LEGACY_KEY_FILES = (
-    "%APPDATA%\\SpeakIt\\openai.key",
+    "%APPDATA%\\HeySpeaky\\openai.key",
     "%APPDATA%\\VoiceType\\openai.key",
 )
 
@@ -313,7 +314,7 @@ class CloudBackend:
     def api_key(self):
         """Finds the key: config, then environment, then the key file.
 
-        The key file matters more than it looks. HeySpeaky starts from a
+        The key file matters more than it looks. SpeakIt starts from a
         Startup shortcut, and a process only inherits environment variables
         that existed when it was created, so a freshly set OPENAI_API_KEY is
         invisible until the next sign-in. The file is read at request time, so
@@ -333,8 +334,9 @@ class CloudBackend:
         path = (self._cloud.get("api_key_file") or "").strip()
         if not path:
             return ""
-        # HeySpeaky was VoiceType, then SpeakIt, and the key stayed under
-        # those names. Looking there too means a rename costs nobody theirs.
+        # SpeakIt was VoiceType, then SpeakIt, then HeySpeaky, and the key
+        # stayed under those names. Looking there too means a rename costs
+        # nobody theirs.
         for candidate in (path,) + LEGACY_KEY_FILES:
             try:
                 expanded = os.path.expandvars(os.path.expanduser(candidate))
@@ -513,7 +515,7 @@ class Router:
         # all of it: the measurement that put them there also showed a Kazakh
         # letter failing to survive into a Russian sentence. What the user has
         # spelled out is applied after the model has had its say. See
-        # heyspeaky/dictionary.py.
+        # speakit/dictionary.py.
         return dictionary.apply(text), backend
 
     def _transcribe(self, pcm_bytes, language):

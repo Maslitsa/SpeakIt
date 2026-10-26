@@ -1,4 +1,4 @@
-"""Tests for the parts of HeySpeaky that need no microphone.
+"""Tests for the parts of SpeakIt that need no microphone.
 
 Most of this project is Win32 behaviour and live audio, which is awkward to
 test in CI. These cover the pure logic underneath: audio maths, the segment
@@ -25,14 +25,15 @@ sys.path.insert(0, str(ROOT))
 
 import numpy as np  # noqa: E402
 
-from heyspeaky import config as config_module          # noqa: E402
-from heyspeaky import dictionary as dictionary_module   # noqa: E402
-from heyspeaky.transcribe import (                     # noqa: E402
+from speakit import config as config_module          # noqa: E402
+from speakit import dictionary as dictionary_module   # noqa: E402
+from speakit.transcribe import (                     # noqa: E402
     CloudBackend, _default_keywords, _default_prompt, _join_segments,
     _merge_spans, pcm_to_float, pcm_to_wav,
 )
 
 _real_dictionary = dictionary_module.PATH
+_real_legacy_dictionaries = dictionary_module.LEGACY_PATHS
 
 
 def setUpModule():
@@ -41,15 +42,20 @@ def setUpModule():
     A request carries whatever words the person running the tests has had to
     correct, because that file is read fresh on every transcription. Left
     alone, the keyword tests pass on a clean CI runner and fail on the
-    owner's machine - which is how this was found.
+    owner's machine - which is how this was found. The old names' files go
+    too: with the current one missing, the lookup falls back to them, and
+    after the rename back to SpeakIt the owner's every word was under
+    HeySpeaky - which is how that was found.
     """
     global _real_dictionary
     _real_dictionary = dictionary_module.PATH
     dictionary_module.PATH = os.path.join(tempfile.mkdtemp(), "none.json")
+    dictionary_module.LEGACY_PATHS = ()
 
 
 def tearDownModule():
     dictionary_module.PATH = _real_dictionary
+    dictionary_module.LEGACY_PATHS = _real_legacy_dictionaries
 
 RATE = 16000
 
@@ -270,7 +276,7 @@ class TheLocalModelGetsEveryThread(unittest.TestCase):
     with four, 6.0 s with all sixteen."""
 
     def setUp(self):
-        from heyspeaky import hardware
+        from speakit import hardware
         self.hardware = hardware
         saved = os.environ.pop("OMP_NUM_THREADS", None)
         if saved is not None:
@@ -302,7 +308,7 @@ class TheLocalModelGetsEveryThread(unittest.TestCase):
     def test_the_engine_makes_its_worker_with_them(self):
         import types
         try:
-            from heyspeaky import engine
+            from speakit import engine
         except Exception:
             self.skipTest("RealtimeSTT is not installed")
         made = []
@@ -318,16 +324,16 @@ class TheLocalModelGetsEveryThread(unittest.TestCase):
 
 class HardwareResolution(unittest.TestCase):
     def test_explicit_values_are_left_alone(self):
-        from heyspeaky.hardware import resolve_hardware
+        from speakit.hardware import resolve_hardware
         self.assertEqual(resolve_hardware("cpu", "int8"), ("cpu", "int8"))
 
     def test_auto_compute_type_follows_the_device(self):
-        from heyspeaky.hardware import resolve_hardware
+        from speakit.hardware import resolve_hardware
         self.assertEqual(resolve_hardware("cuda", "auto")[1], "float16")
         self.assertEqual(resolve_hardware("cpu", "auto")[1], "int8")
 
     def test_auto_device_resolves_to_something_usable(self):
-        from heyspeaky.hardware import resolve_hardware
+        from speakit.hardware import resolve_hardware
         device, compute = resolve_hardware("auto", "auto")
         self.assertIn(device, ("cpu", "cuda"))
         self.assertIn(compute, ("int8", "float16"))
@@ -339,7 +345,7 @@ class CappedLogStream(unittest.TestCase):
     def _stream_class(self):
         import importlib.util
         spec = importlib.util.spec_from_file_location(
-            "heyspeaky_run", ROOT / "run.py")
+            "speakit_run", ROOT / "run.py")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         return module._CappedStream
@@ -386,13 +392,13 @@ class KeyFile(unittest.TestCase):
 
     def test_reads_the_current_location(self):
         with tempfile.TemporaryDirectory() as tmp:
-            self._write(Path(tmp) / "HeySpeaky", "test-key-new")
+            self._write(Path(tmp) / "SpeakIt", "test-key-new")
             backend, env = self._backend(tmp)
             with env:
                 self.assertEqual(backend.api_key, "test-key-new")
 
     def test_falls_back_to_every_old_location(self):
-        for old in ("SpeakIt", "VoiceType"):
+        for old in ("HeySpeaky", "VoiceType"):
             with tempfile.TemporaryDirectory() as tmp:
                 self._write(Path(tmp) / old, "test-key-old")
                 backend, env = self._backend(tmp)
@@ -401,19 +407,38 @@ class KeyFile(unittest.TestCase):
 
     def test_the_key_file_default_uses_the_current_name(self):
         default = config_module.DEFAULTS["transcription"]["cloud"]["api_key_file"]
-        self.assertIn("HeySpeaky", default)
-        self.assertNotIn("SpeakIt", default)
+        self.assertIn("SpeakIt", default)
+        self.assertNotIn("HeySpeaky", default)
 
     def test_current_location_wins_when_both_exist(self):
         with tempfile.TemporaryDirectory() as tmp:
-            self._write(Path(tmp) / "HeySpeaky", "test-key-new")
-            self._write(Path(tmp) / "SpeakIt", "test-key-old")
+            self._write(Path(tmp) / "SpeakIt", "test-key-new")
+            self._write(Path(tmp) / "HeySpeaky", "test-key-old")
             backend, env = self._backend(tmp)
             with env:
                 self.assertEqual(backend.api_key, "test-key-new")
 
+    def test_a_config_from_heyspeaky_reads_the_carried_key(self):
+        """config.json keeps the key path it was first written with. One
+        carried across from HeySpeaky names the HeySpeaky folder, and once
+        upgraded it must find the key the installer put in the new one."""
+        import os
+        from unittest import mock
 
-from heyspeaky import languages  # noqa: E402
+        stored = {"transcription": {"cloud": {
+            "api_key_file": "%APPDATA%\\HeySpeaky\\openai.key"}}}
+        upgraded, _ = config_module._migrate(stored)
+        cfg = config_module._deep_merge(config_module.DEFAULTS, upgraded)
+        variable = cfg["transcription"]["cloud"]["api_key_env"]
+        with tempfile.TemporaryDirectory() as tmp:
+            self._write(Path(tmp) / "SpeakIt", "test-key-carried")
+            env = {k: v for k, v in os.environ.items() if k != variable}
+            env["APPDATA"] = tmp
+            with mock.patch.dict(os.environ, env, clear=True):
+                self.assertEqual(CloudBackend(cfg).api_key, "test-key-carried")
+
+
+from speakit import languages  # noqa: E402
 
 
 class LanguageList(unittest.TestCase):
@@ -512,11 +537,11 @@ class LanguageGroups(unittest.TestCase):
         self.assertTrue(all(len(code) == 2 for code in languages.NAMES))
 
 
-from heyspeaky import diagnostics  # noqa: E402
+from speakit import diagnostics  # noqa: E402
 
 
 class ProblemReport(unittest.TestCase):
-    """The ZIP someone sends when HeySpeaky works worse on their PC."""
+    """The ZIP someone sends when SpeakIt works worse on their PC."""
 
     # Built at runtime so the repository's secret scan has nothing to find.
     FAKE_KEY = "sk-proj-" + "a1" * 20
@@ -562,7 +587,7 @@ class ProblemReport(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             logs = Path(tmp) / "logs"
             logs.mkdir()
-            (logs / "heyspeaky.log").write_text(
+            (logs / "speakit.log").write_text(
                 "sent with " + self.FAKE_KEY, encoding="utf-8")
             path = diagnostics.save_report(cfg, [entry, entry], logs,
                                            out_dir=tmp, check_network=False)
@@ -571,7 +596,7 @@ class ProblemReport(unittest.TestCase):
                 contents = b"".join(archive.read(name) for name in names)
                 report = archive.read("report.txt").decode("utf-8")
         self.assertEqual(names, {"report.txt", "config.json",
-                                 "logs/heyspeaky.log", "recordings/1.wav",
+                                 "logs/speakit.log", "recordings/1.wav",
                                  "recordings/2.wav"})
         self.assertNotIn(self.FAKE_KEY.encode(), contents)
         self.assertIn("local (offline)", report)
@@ -629,7 +654,7 @@ class InstallProgress(unittest.TestCase):
 
 from PIL import Image  # noqa: E402
 
-from heyspeaky import glass, theme  # noqa: E402
+from speakit import glass, theme  # noqa: E402
 
 
 class GlassComposer(unittest.TestCase):
@@ -764,7 +789,7 @@ class GlassComposer(unittest.TestCase):
 
 
 try:
-    from heyspeaky import panel as panel_module
+    from speakit import panel as panel_module
 except Exception:           # no tkinter
     panel_module = None
 
@@ -947,7 +972,7 @@ class GlassPill(unittest.TestCase):
         self.assertEqual(frame.size, self.window())
 
 
-from heyspeaky import usage  # noqa: E402
+from speakit import usage  # noqa: E402
 
 
 class Spending(unittest.TestCase):
@@ -998,11 +1023,11 @@ class Spending(unittest.TestCase):
         self.assertTrue(usage.path().is_file())
 
 
-from heyspeaky import updates  # noqa: E402
+from speakit import updates  # noqa: E402
 
 
 class Updates(unittest.TestCase):
-    """Noticing that a newer HeySpeaky exists."""
+    """Noticing that a newer SpeakIt exists."""
 
     def setUp(self):
         import os
@@ -1031,6 +1056,21 @@ class Updates(unittest.TestCase):
         updates._write({"checked": 1000.0, "latest": "99.0"})
         # A network call here would raise, since the time has not passed.
         self.assertEqual(updates.check(now=1000.0 + 60), "99.0")
+
+    def test_a_renamed_repository_still_answers(self):
+        """GitHub answers a renamed repository's old API address with a 301.
+        Measured on 26 October on vuejs/vue-next, renamed to vuejs/core.
+        Every copy installed before a rename asks the old address."""
+        from unittest import mock
+
+        def get(url, **kwargs):
+            if not kwargs.get("follow_redirects"):
+                return mock.Mock(status_code=301)
+            return mock.Mock(status_code=200,
+                             json=lambda: {"tag_name": "v99.0"})
+
+        with mock.patch("httpx.get", get):
+            self.assertEqual(updates.check(force=True, now=5000.0), "v99.0")
 
 
 class PillButtons(unittest.TestCase):
@@ -1168,7 +1208,7 @@ class PillButtons(unittest.TestCase):
                                        % scale)
 
 
-from heyspeaky import sound  # noqa: E402
+from speakit import sound  # noqa: E402
 
 
 class FinishSound(unittest.TestCase):
@@ -1199,8 +1239,8 @@ class FinishSound(unittest.TestCase):
 
 
 try:
-    from heyspeaky import hotkey                 # noqa: E402
-    from heyspeaky.hotkey import HotkeyListener  # noqa: E402
+    from speakit import hotkey                 # noqa: E402
+    from speakit.hotkey import HotkeyListener  # noqa: E402
 except Exception:
     # The hook needs the keyboard package, which is not only sometimes absent
     # but can also fail to start on a machine with no real keyboard. Either
@@ -1305,7 +1345,7 @@ class DoubleTapGesture(unittest.TestCase):
         self.assertFalse(self.latched.wait(0.3))
 
 
-from heyspeaky import levels  # noqa: E402
+from speakit import levels  # noqa: E402
 
 
 class QuietAudio(unittest.TestCase):
@@ -1419,6 +1459,36 @@ class PersonalDictionary(unittest.TestCase):
     def setUp(self):
         folder = tempfile.mkdtemp()
         self.path = os.path.join(folder, "dictionary.json")
+
+    def in_appdata(self, *names):
+        """The real lookup, current name first, inside a temporary %APPDATA%
+        holding one dictionary per folder named."""
+        from unittest import mock
+
+        appdata = tempfile.mkdtemp()
+        for name in names:
+            entries = dictionary.add(self.WRONG, name, entries=[])
+            dictionary.save(entries, os.path.join(appdata, name,
+                                                  "dictionary.json"))
+        env = mock.patch.dict(os.environ, {"APPDATA": appdata})
+        path = mock.patch.object(dictionary, "PATH",
+                                 "%APPDATA%\\SpeakIt\\dictionary.json")
+        legacy = mock.patch.object(dictionary, "LEGACY_PATHS",
+                                   _real_legacy_dictionaries)
+        return env, path, legacy
+
+    def test_a_dictionary_saved_under_heyspeaky_is_still_read(self):
+        """Every correction the owner made, he made under HeySpeaky."""
+        env, path, legacy = self.in_appdata("HeySpeaky")
+        with env, path, legacy:
+            self.assertEqual([e["meant"] for e in dictionary.load()],
+                             ["HeySpeaky"])
+
+    def test_the_current_dictionary_wins_over_the_old_one(self):
+        env, path, legacy = self.in_appdata("HeySpeaky", "SpeakIt")
+        with env, path, legacy:
+            self.assertEqual([e["meant"] for e in dictionary.load()],
+                             ["SpeakIt"])
 
     def test_a_correction_survives_a_round_trip(self):
         entries = dictionary.add(self.WRONG, self.NAME, entries=[])
@@ -1692,6 +1762,37 @@ class OldConfigsMoveForward(unittest.TestCase):
         current = config_module.DEFAULTS["transcription"]["cloud"]["languages"]
         self.assertNotIn(list(current), config_module.SUPERSEDED_LANGUAGES)
 
+    def key_file(self, path):
+        return {"transcription": {"cloud": {"api_key_file": path}}}
+
+    def test_the_heyspeaky_key_path_moves_to_the_current_name(self):
+        """Without this the tray would go on saving a new key into the
+        HeySpeaky folder, which nothing owns any more."""
+        cfg, changed = config_module._migrate(
+            self.key_file("%APPDATA%\\HeySpeaky\\openai.key"))
+        self.assertTrue(changed)
+        self.assertEqual(
+            cfg["transcription"]["cloud"]["api_key_file"],
+            config_module.DEFAULTS["transcription"]["cloud"]["api_key_file"])
+
+    def test_a_speakit_key_path_from_before_heyspeaky_stays(self):
+        """The owner's HeySpeaky was a SpeakIt first, and its config.json
+        still names the SpeakIt folder. That is the current one again."""
+        stored = "%APPDATA%\\SpeakIt\\openai.key"
+        cfg, changed = config_module._migrate(self.key_file(stored))
+        self.assertFalse(changed)
+        self.assertEqual(cfg["transcription"]["cloud"]["api_key_file"], stored)
+
+    def test_a_key_path_somebody_chose_is_left_alone(self):
+        stored = "D:\\keys\\openai.txt"
+        cfg, changed = config_module._migrate(self.key_file(stored))
+        self.assertFalse(changed)
+        self.assertEqual(cfg["transcription"]["cloud"]["api_key_file"], stored)
+
+    def test_the_current_key_path_is_not_superseded(self):
+        current = config_module.DEFAULTS["transcription"]["cloud"]["api_key_file"]
+        self.assertNotIn(current, config_module.SUPERSEDED_KEY_FILES)
+
 
 @unittest.skipIf(HotkeyListener is None, "the keyboard package is missing")
 class CorrectionKey(unittest.TestCase):
@@ -1912,12 +2013,12 @@ class ACancelledChordStaysCancelled(unittest.TestCase):
 
 
 try:
-    from heyspeaky import correct
+    from speakit import correct
 except Exception:           # no tkinter or no Pillow
     correct = None
 
 try:
-    from heyspeaky import app as app_module
+    from speakit import app as app_module
 except Exception:           # CI does not install the audio stack
     app_module = None
 
@@ -1986,7 +2087,7 @@ class ADiscardedRecordingSaysHowLoudItWas(unittest.TestCase):
         app._audio_lock = threading.Lock()
         tone = (np.sin(np.arange(16000) * 0.1) * 0.1 * 32767).astype("<i2")
         app._audio_chunks = [tone.tobytes()]
-        with self.assertLogs("heyspeaky", level="INFO") as logs:
+        with self.assertLogs("speakit", level="INFO") as logs:
             app._finish_recording()
         line = [said for said in logs.output
                 if "Discarding recording" in said][0]
@@ -2094,7 +2195,7 @@ class ReadingTheSelection(unittest.TestCase):
     WORD = "Маржан"
 
     def setUp(self):
-        from heyspeaky import output
+        from speakit import output
         self.output = output
         self.clipboard = {"text": "what was there before", "seq": 1}
         self.sent = []
@@ -2149,7 +2250,7 @@ class ReadingTheSelection(unittest.TestCase):
 
     def test_the_log_says_how_much_and_from_where_but_not_what(self):
         self.answers = [self.WORD]
-        with self.assertLogs("heyspeaky.output", level="INFO") as logs:
+        with self.assertLogs("speakit.output", level="INFO") as logs:
             self.output.copy_selection(1.0, settle=0.2)
         said = "\n".join(logs.output)
         self.assertIn("6 chars", said)
@@ -2186,7 +2287,7 @@ class ReadingTheSelection(unittest.TestCase):
         real = hotkey._key_down
         self.addCleanup(setattr, hotkey, "_key_down", real)
         hotkey._key_down = lambda vk: vk == 0x12      # Alt, for ever
-        with self.assertLogs("heyspeaky.hotkey", level="WARNING") as logs:
+        with self.assertLogs("speakit.hotkey", level="WARNING") as logs:
             self.assertFalse(hotkey.wait_for_modifiers_released(0.1))
         self.assertIn("alt", "\n".join(logs.output))
 
@@ -2546,7 +2647,7 @@ try:
 except Exception:                              # no display, no Tcl
     _tk_root = None
 
-from heyspeaky import keymap  # noqa: E402
+from speakit import keymap  # noqa: E402
 
 
 class _KeyEvent(object):
@@ -2631,7 +2732,7 @@ class TypingInTheLayoutInUse(unittest.TestCase):
         self.assertEqual(entry.get(), "")
 
 
-from heyspeaky import apikey  # noqa: E402
+from speakit import apikey  # noqa: E402
 
 
 class AddingTheKeyFromTheTray(unittest.TestCase):
@@ -2712,7 +2813,7 @@ class AddingTheKeyFromTheTray(unittest.TestCase):
 
     def test_the_key_never_reaches_the_log(self):
         flow = self.flow(clipboard=self.KEY)
-        with self.assertLogs("heyspeaky.apikey", level="INFO") as logs:
+        with self.assertLogs("speakit.apikey", level="INFO") as logs:
             flow.submit(self.KEY)
             self.settle(flow)
         said = "\n".join(logs.output)
@@ -2726,7 +2827,7 @@ class AddingTheKeyFromTheTray(unittest.TestCase):
 
     def test_the_file_holds_the_key_and_nothing_else(self):
         folder = tempfile.mkdtemp()
-        path = os.path.join(folder, "HeySpeaky", "openai.key")
+        path = os.path.join(folder, "SpeakIt", "openai.key")
         apikey.save({"transcription": {"cloud": {"api_key_file": path}}},
                     self.KEY + "\n")
         with open(path, "rb") as handle:
@@ -2816,7 +2917,7 @@ class TheKeyPage(_PanelModel, unittest.TestCase):
         self.assertGreater(sum(middle[:3]), 600)        # white, ready
 
 
-from heyspeaky import localmodels  # noqa: E402
+from speakit import localmodels  # noqa: E402
 
 
 class ChoosingTheModelOnThisLaptop(unittest.TestCase):
@@ -2907,7 +3008,7 @@ class ChoosingTheModelOnThisLaptop(unittest.TestCase):
 
 
 class TheShortcutsHaveAnIcon(unittest.TestCase):
-    """The Start menu showed a blank window for HeySpeaky."""
+    """The Start menu showed a blank window for SpeakIt."""
 
     def test_the_icon_is_a_tile_with_the_waveform(self):
         image = glass.app_icon(64)
@@ -2919,7 +3020,7 @@ class TheShortcutsHaveAnIcon(unittest.TestCase):
 
     def test_the_file_carries_the_small_sizes_windows_asks_for(self):
         from PIL import Image
-        path = os.path.join(tempfile.mkdtemp(), "heyspeaky.ico")
+        path = os.path.join(tempfile.mkdtemp(), "speakit.ico")
         glass.save_app_icon(path)
         with Image.open(path) as image:
             sizes = image.info.get("sizes", set())
@@ -2944,7 +3045,7 @@ class TheLogSaysWhyCtrlAltDidNothing(unittest.TestCase):
 
     def test_the_first_key_after_starting_is_noted_once(self):
         listener = self.listener()
-        with self.assertLogs("heyspeaky.hotkey", level="INFO") as logs:
+        with self.assertLogs("speakit.hotkey", level="INFO") as logs:
             listener._on_key_event(_Event("shift", "down"))
             listener._on_key_event(_Event("shift", "up"))
             listener._on_key_event(_Event("ctrl", "down"))
@@ -2954,7 +3055,7 @@ class TheLogSaysWhyCtrlAltDidNothing(unittest.TestCase):
     def test_ctrl_alt_on_top_of_a_held_key_says_so_without_the_letter(self):
         listener = self.listener()
         listener._keys_seen = 5
-        with self.assertLogs("heyspeaky.hotkey", level="INFO") as logs:
+        with self.assertLogs("speakit.hotkey", level="INFO") as logs:
             listener._on_key_event(_Event("q", "down"))
             listener._on_key_event(_Event("ctrl", "down"))
             listener._on_key_event(_Event("alt", "down"))
@@ -2968,14 +3069,14 @@ class TheLogSaysWhyCtrlAltDidNothing(unittest.TestCase):
         """Sixty-three refreshes in two days, and what caused them was still
         a guess - a wheel, a click? The program in front sorts them: the
         lock screen, an elevated window, an ordinary one."""
-        from heyspeaky import output
+        from speakit import output
         listener = self.listener()
         listener._uninstall = lambda: None
         listener._install = lambda: None
         real = output._foreground_program
         self.addCleanup(setattr, output, "_foreground_program", real)
         output._foreground_program = lambda: "LockApp.exe"
-        with self.assertLogs("heyspeaky.hotkey", level="INFO") as logs:
+        with self.assertLogs("speakit.hotkey", level="INFO") as logs:
             listener._refresh("saw nothing for 70s while Windows saw input "
                               "0s ago")
         self.assertIn("LockApp.exe in front; refreshing the hook",
@@ -2995,17 +3096,17 @@ class TheSessionBrief(unittest.TestCase):
     """What every session used to gather by hand, in twenty lines."""
 
     LOG = [
-        "2026-09-20 10:00:00,000 INFO    heyspeaky          HeySpeaky running",
-        "2026-09-25 09:00:00,000 INFO    heyspeaky          HeySpeaky running",
-        "2026-09-25 09:01:00,000 INFO    heyspeaky          Final transcript "
+        "2026-09-20 10:00:00,000 INFO    speakit          SpeakIt running",
+        "2026-09-25 09:00:00,000 INFO    speakit          SpeakIt running",
+        "2026-09-25 09:01:00,000 INFO    speakit          Final transcript "
         "(cloud): 40 chars",
-        "2026-09-25 09:02:00,000 INFO    heyspeaky.output   Selection: 6 chars"
+        "2026-09-25 09:02:00,000 INFO    speakit.output   Selection: 6 chars"
         " from claude.exe (Chrome_WidgetWin_1), 1 try; keys up after 0.20s;"
         " the window answered",
-        "2026-09-25 09:03:00,000 INFO    heyspeaky.output   Selection: 0 chars"
+        "2026-09-25 09:03:00,000 INFO    speakit.output   Selection: 0 chars"
         " from Chrome_WidgetWin_1, 2 tries; keys up after 0.14s; the window "
         "never answered",
-        "2026-09-25 09:04:00,000 WARNING heyspeaky          Another instance "
+        "2026-09-25 09:04:00,000 WARNING speakit          Another instance "
         "is already running; exiting",
         "  a traceback line with no stamp",
     ]
@@ -3024,7 +3125,7 @@ class TheSessionBrief(unittest.TestCase):
     def test_it_sorts_hook_refreshes_by_the_program_in_front(self):
         import datetime
         brief = _tool("session_brief")
-        said = ("2026-09-25 10:0{}:00,000 INFO    heyspeaky.hotkey   Keyboard "
+        said = ("2026-09-25 10:0{}:00,000 INFO    speakit.hotkey   Keyboard "
                 "hook saw nothing for 70s while Windows saw input 0s ago; {} "
                 "in front; refreshing the hook (#{})")
         lines = [said.format(0, "LockApp.exe", 1),
@@ -3045,6 +3146,45 @@ class TheSessionBrief(unittest.TestCase):
         (here / "c.py").write_bytes(b"new\n")
         self.assertEqual(brief.drift(here, there, ["a.py", "b.py", "c.py"]),
                          (["b.py"], ["c.py"]))
+
+    def _copy(self, programs, name, package, age_days):
+        import os
+        import time
+
+        log = programs / name / "logs" / (package + ".log")
+        log.parent.mkdir(parents=True)
+        log.write_text("x\n")
+        when = time.time() - age_days * 86400
+        os.utime(str(log), (when, when))
+
+    def test_the_copy_in_use_is_the_one_whose_log_moved_last(self):
+        """The owner's SpeakIt folder holds a September SpeakIt whose log
+        stopped then. Until he updates, the app he uses is HeySpeaky."""
+        brief = _tool("session_brief")
+        programs = Path(tempfile.mkdtemp())
+        self._copy(programs, "SpeakIt", "speakit", 40)
+        self._copy(programs, "HeySpeaky", "heyspeaky", 0)
+        folder, package, log = brief.installed_copy(programs)
+        self.assertEqual((folder.name, package, log.name),
+                         ("HeySpeaky", "heyspeaky", "heyspeaky.log"))
+
+    def test_after_the_update_it_is_speakit(self):
+        brief = _tool("session_brief")
+        programs = Path(tempfile.mkdtemp())
+        self._copy(programs, "HeySpeaky", "heyspeaky", 1)
+        self._copy(programs, "SpeakIt", "speakit", 0)
+        folder, package, _log = brief.installed_copy(programs)
+        self.assertEqual((folder.name, package), ("SpeakIt", "speakit"))
+
+    def test_an_older_copy_is_compared_under_its_own_package_name(self):
+        brief = _tool("session_brief")
+        here, there = Path(tempfile.mkdtemp()), Path(tempfile.mkdtemp())
+        (here / "speakit").mkdir()
+        (there / "heyspeaky").mkdir()
+        (here / "speakit" / "app.py").write_bytes(b"same\n")
+        (there / "heyspeaky" / "app.py").write_bytes(b"same\r\n")
+        self.assertEqual(brief.drift(here, there, ["speakit/app.py"],
+                                     package="heyspeaky"), ([], []))
 
 
 class TheCommitCheckGuardsTheInstaller(unittest.TestCase):
@@ -3220,14 +3360,14 @@ class TheMonoSound(unittest.TestCase):
     """The reel's sound, rebuilt from numbers measured off it."""
 
     def test_two_notes_a_fourth_apart(self):
-        from heyspeaky import sound
+        from speakit import sound
         pitches = sorted(set(round(tone[0]) for tone
                              in sound.VOICES["blip"]["tones"]))
         self.assertEqual(pitches, [500, 669, 670, 671])
         self.assertAlmostEqual(669 / 500.0, 4 / 3.0, places=1)
 
     def test_the_sound_follows_the_look_unless_one_was_chosen(self):
-        from heyspeaky import sound
+        from speakit import sound
         self.assertEqual(sound.for_look("auto", "mono"), "blip")
         self.assertEqual(sound.for_look("auto", "glass"), "drip")
         self.assertEqual(sound.for_look("bowl", "mono"), "bowl")
@@ -3276,7 +3416,7 @@ class MonoAppearsAtThePointer(unittest.TestCase):
 
     def overlay(self, anchor):
         import types
-        from heyspeaky import overlay as overlay_module
+        from speakit import overlay as overlay_module
         real = overlay_module._cursor_work_area
         self.addCleanup(setattr, overlay_module, "_cursor_work_area", real)
         overlay_module._cursor_work_area = lambda: (0, 0, 1920, 1040)

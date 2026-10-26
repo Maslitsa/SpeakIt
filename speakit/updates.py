@@ -1,4 +1,4 @@
-"""Is there a newer HeySpeaky, and updating to it from the tray.
+"""Is there a newer SpeakIt, and updating to it from the tray.
 
 People install by pasting one command, which means they never learn that a
 fix exists. This asks GitHub once a day, remembers the answer next to the key
@@ -20,10 +20,10 @@ from pathlib import Path
 
 from . import __version__
 
-logger = logging.getLogger("heyspeaky.updates")
+logger = logging.getLogger("speakit.updates")
 
-LATEST_URL = "https://api.github.com/repos/Maslitsa/HeySpeaky/releases/latest"
-STATE = "%APPDATA%\\HeySpeaky\\update.json"
+LATEST_URL = "https://api.github.com/repos/Maslitsa/SpeakIt/releases/latest"
+STATE = "%APPDATA%\\SpeakIt\\update.json"
 EVERY = 24 * 60 * 60
 TIMEOUT = 6.0
 
@@ -84,7 +84,11 @@ def check(force=False, now=None):
     try:
         import httpx
 
+        # A renamed repository answers its old address with a redirect, and
+        # httpx does not follow one unless asked: every copy installed
+        # before a rename would stop hearing about updates.
         response = httpx.get(LATEST_URL, timeout=TIMEOUT,
+                             follow_redirects=True,
                              headers={"Accept": "application/vnd.github+json"})
         if response.status_code != 200:
             logger.debug("GitHub answered %s", response.status_code)
@@ -102,7 +106,7 @@ def check(force=False, now=None):
     data["latest"] = offered
     _write(data)
     if offered and is_newer(offered):
-        logger.info("HeySpeaky %s is available; running %s", offered,
+        logger.info("SpeakIt %s is available; running %s", offered,
                     __version__)
         return offered
     return ""

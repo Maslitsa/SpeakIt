@@ -29,12 +29,12 @@ jobs:
           python-version: ${{ matrix.python }}
 
       - name: Compile every source file
-        run: python -m compileall -q heyspeaky run.py tools
+        run: python -m compileall -q speakit run.py tools
 
       - name: Fail on syntax warnings
         # Escaped backslashes in Windows paths inside docstrings are an easy
         # mistake to make in this codebase, and they only warn.
-        run: python -W error::SyntaxWarning -m compileall -q -f heyspeaky run.py tools
+        run: python -W error::SyntaxWarning -m compileall -q -f speakit run.py tools
 
       - name: Install the dependencies the tests need
         # Not the whole requirements file: PyTorch is gigabytes and the tests
@@ -46,7 +46,7 @@ jobs:
 
       - name: Import the modules that need no audio hardware
         run: |
-          python -c "import sys; sys.path.insert(0, '.'); from heyspeaky import winjob; print('winjob installs:', winjob.join_kill_on_close())"
+          python -c "import sys; sys.path.insert(0, '.'); from speakit import winjob; print('winjob installs:', winjob.join_kill_on_close())"
 
       - name: Check the installer and uninstaller parse
         shell: pwsh
@@ -70,9 +70,29 @@ jobs:
         # Without .git, because uninstall.ps1 never deletes a git clone.
         shell: pwsh
         run: |
-          $dest = Join-Path $env:LOCALAPPDATA 'Programs\HeySpeaky'
+          $dest = Join-Path $env:LOCALAPPDATA 'Programs\SpeakIt'
           New-Item -ItemType Directory -Force -Path $dest | Out-Null
           Get-ChildItem -Force | Where-Object Name -ne '.git' | Copy-Item -Destination $dest -Recurse -Force
+
+      - name: Leave a HeySpeaky to carry across, and a SpeakIt from before it
+        # What the owner's PC had when HeySpeaky became SpeakIt again: a
+        # working HeySpeaky, and in the SpeakIt folder the settings of a
+        # September SpeakIt that must not win. None of it is a real key.
+        shell: pwsh
+        run: |
+          $old = Join-Path $env:LOCALAPPDATA 'Programs\HeySpeaky'
+          New-Item -ItemType Directory -Force -Path $old | Out-Null
+          'placeholder' | Set-Content (Join-Path $old 'run.py')
+          'placeholder' | Set-Content (Join-Path $old 'install.ps1')
+          '{"transcription": {"cloud": {"api_key_file": "%APPDATA%\\HeySpeaky\\openai.key", "keywords": ["CarriedAcross"]}}}' |
+            Set-Content (Join-Path $old 'config.json')
+          $data = Join-Path $env:APPDATA 'HeySpeaky'
+          New-Item -ItemType Directory -Force -Path $data | Out-Null
+          'not-a-key-carried' | Set-Content (Join-Path $data 'openai.key')
+          '{"words": [{"heard": "Marzhan", "meant": "Magzhan", "count": 1}]}' | Set-Content (Join-Path $data 'dictionary.json')
+          $stale = Join-Path $env:LOCALAPPDATA 'Programs\SpeakIt\config.json'
+          '{"transcription": {"cloud": {"keywords": ["September"]}}}' | Set-Content $stale
+          (Get-Item $stale).LastWriteTime = (Get-Date).AddDays(-40)
 
       - name: Run install.ps1
         # Windows PowerShell 5.1 on purpose, because that is what every Windows
@@ -82,15 +102,29 @@ jobs:
         # need a microphone, which a runner does not have. -Backend answers
         # the question a fresh install asks.
         shell: cmd
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File "%LOCALAPPDATA%\Programs\HeySpeaky\install.ps1" -NoStart -NoAutostart -Backend local
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File "%LOCALAPPDATA%\Programs\SpeakIt\install.ps1" -NoStart -NoAutostart -Backend local
 
       - name: Check the answer was saved
         shell: pwsh
         run: |
-          $cfg = Get-Content (Join-Path $env:LOCALAPPDATA 'Programs\HeySpeaky\config.json') -Raw | ConvertFrom-Json
+          $cfg = Get-Content (Join-Path $env:LOCALAPPDATA 'Programs\SpeakIt\config.json') -Raw | ConvertFrom-Json
           if ($cfg.transcription.backend -ne 'local') { throw "backend is '$($cfg.transcription.backend)', expected 'local'" }
-          # Something for the uninstall to remove. Not a real key.
-          New-Item -ItemType File -Force -Path (Join-Path $env:APPDATA 'HeySpeaky\openai.key') -Value 'not-a-key' | Out-Null
+
+      - name: Check HeySpeaky was carried across
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:LOCALAPPDATA 'Programs\SpeakIt'
+          $cfg = Get-Content (Join-Path $root 'config.json') -Raw | ConvertFrom-Json
+          if ($cfg.transcription.cloud.keywords -notcontains 'CarriedAcross') { throw "the HeySpeaky settings did not win: $($cfg.transcription.cloud.keywords)" }
+          if ($cfg.transcription.cloud.api_key_file -ne '%APPDATA%\SpeakIt\openai.key') { throw "the key file is still $($cfg.transcription.cloud.api_key_file)" }
+          $key = (Get-Content (Join-Path $env:APPDATA 'SpeakIt\openai.key') -Raw).Trim()
+          if ($key -ne 'not-a-key-carried') { throw 'the key was not carried across' }
+          if (-not ((Get-Content (Join-Path $env:APPDATA 'SpeakIt\dictionary.json') -Raw) -match 'Magzhan')) { throw 'the dictionary was not carried across' }
+          if (-not (Test-Path (Join-Path $env:LOCALAPPDATA 'Programs\HeySpeaky\MOVED-TO-SPEAKIT.txt'))) { throw 'the HeySpeaky folder was not marked as carried' }
+          $aside = @(Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Programs') -Directory -Filter 'SpeakIt.old-*')
+          if ($aside.Count -ne 1) { throw "expected one folder of September settings, found $($aside.Count)" }
+          if (-not ((Get-Content (Join-Path $aside[0].FullName 'config.json') -Raw) -match 'September')) { throw 'the September settings were not kept aside' }
+          Write-Host "carried across, and the September settings kept in $($aside[0].Name)"
 
       - name: Run uninstall.ps1
         shell: cmd
@@ -100,12 +134,29 @@ jobs:
         shell: pwsh
         run: |
           $left = @(
+            (Join-Path $env:LOCALAPPDATA 'Programs\SpeakIt'),
             (Join-Path $env:LOCALAPPDATA 'Programs\HeySpeaky'),
-            (Join-Path ([Environment]::GetFolderPath('Programs')) 'HeySpeaky\HeySpeaky.lnk'),
+            (Join-Path ([Environment]::GetFolderPath('Programs')) 'SpeakIt\SpeakIt.lnk'),
+            (Join-Path $env:APPDATA 'SpeakIt'),
             (Join-Path $env:APPDATA 'HeySpeaky')
           ) | Where-Object { Test-Path -LiteralPath $_ }
+          $left += @(Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Programs') -Directory -Filter 'SpeakIt.old-*' | ForEach-Object FullName)
           if ($left) { $left | ForEach-Object { Write-Error "still there: $_" }; exit 1 }
           Write-Host "uninstall removed everything"
+
+  old-address:
+    name: The HeySpeaky install command still works
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch install.ps1 from the old address
+        # The one-command install was published, and saved, with the
+        # HeySpeaky address in it. GitHub goes on serving a renamed
+        # repository under its old name - until somebody makes a new
+        # repository called HeySpeaky on this account, which this catches.
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/Maslitsa/HeySpeaky/main/install.ps1 -o install.ps1
+          grep -q "Installs or updates" install.ps1
+          echo "The old address still serves the installer."
 
   secrets:
     name: No committed secrets

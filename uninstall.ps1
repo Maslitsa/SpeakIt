@@ -1,16 +1,17 @@
 <#
 .SYNOPSIS
-    Removes HeySpeaky from this PC: every copy, its shortcuts, the saved OpenAI
+    Removes SpeakIt from this PC: every copy, its shortcuts, the saved OpenAI
     key and the downloaded speech models.
 
 .DESCRIPTION
     Paste this into PowerShell:
 
-        irm https://raw.githubusercontent.com/Maslitsa/HeySpeaky/main/uninstall.ps1 | iex
+        irm https://raw.githubusercontent.com/Maslitsa/SpeakIt/main/uninstall.ps1 | iex
 
-    Copies installed under the older names VoiceType and SpeakIt are removed
-    too. A folder is only deleted if it is an installed copy. A git
-    clone is left where it is, so this never deletes someone's working copy.
+    Copies installed under the older names VoiceType and HeySpeaky are
+    removed too, and the old settings an update set aside. A folder is only
+    deleted if it is an installed copy. A git clone is left where it is, so
+    this never deletes someone's working copy.
 
 .PARAMETER InstallDir
     One more folder to remove, for a copy somewhere unusual whose shortcuts are
@@ -36,7 +37,7 @@ try {
     [Threading.Thread]::CurrentThread.CurrentUICulture = [Globalization.CultureInfo]::GetCultureInfo('en-US')
 } catch {}
 
-$Names       = @('HeySpeaky', 'SpeakIt', 'VoiceType')
+$Names       = @('SpeakIt', 'HeySpeaky', 'VoiceType')
 $StartupDir  = [Environment]::GetFolderPath('Startup')
 $ProgramsDir = [Environment]::GetFolderPath('Programs')
 if ($env:HF_HUB_CACHE) {
@@ -162,7 +163,7 @@ function Invoke-Uninstall {
         Add-Folder (Get-ShortcutFolder $lnk)
     }
 
-    Write-Step 'Stopping HeySpeaky'
+    Write-Step 'Stopping SpeakIt'
     Stop-Everything
 
     Write-Step 'Removing shortcuts'
@@ -184,6 +185,14 @@ function Invoke-Uninstall {
         }
     }
     if (-not $Folders.Count) { Write-Note 'no installed copy found' }
+    # What install.ps1 moved out of the way when HeySpeaky became SpeakIt
+    # again: the settings and logs of the SpeakIt from before it.
+    foreach ($name in $Names) {
+        $programs = Join-Path $env:LOCALAPPDATA 'Programs'
+        if (-not (Test-Path -LiteralPath $programs)) { continue }
+        Get-ChildItem -LiteralPath $programs -Directory -Filter "$name.old-*" -ErrorAction SilentlyContinue |
+            ForEach-Object { Remove-Path $_.FullName }
+    }
 
     Write-Step 'Removing your saved OpenAI key'
     $keyDirs = @($Names | ForEach-Object { Join-Path $env:APPDATA $_ } | Where-Object { Test-Path -LiteralPath $_ })
@@ -202,7 +211,7 @@ function Invoke-Uninstall {
     if (-not $models) { Write-Note 'none found' }
 
     Write-Host ''
-    Write-Host 'HeySpeaky is uninstalled.' -ForegroundColor Green
+    Write-Host 'SpeakIt is uninstalled.' -ForegroundColor Green
     if ($kept) {
         Write-Host ''
         Write-Host 'Left alone, because they are git clones. Delete them yourself if you want:'
@@ -229,7 +238,7 @@ try {
         Set-Location -LiteralPath $env:USERPROFILE
     }
     # UNINSTALL.bat runs a temporary copy of this script.
-    if ($SelfPath -and $SelfPath -like "$env:TEMP\HeySpeaky-uninstall.ps1") {
+    if ($SelfPath -and $SelfPath -like "$env:TEMP\SpeakIt-uninstall.ps1") {
         Remove-Item -LiteralPath $SelfPath -Force -ErrorAction SilentlyContinue
     }
 }

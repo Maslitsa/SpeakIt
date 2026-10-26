@@ -1,11 +1,11 @@
 <#
 .SYNOPSIS
-    Installs or updates HeySpeaky.
+    Installs or updates SpeakIt.
 
 .DESCRIPTION
     One command, pasted into PowerShell:
 
-        irm https://raw.githubusercontent.com/Maslitsa/HeySpeaky/main/install.ps1 | iex
+        irm https://raw.githubusercontent.com/Maslitsa/SpeakIt/main/install.ps1 | iex
 
     It runs inside the PowerShell that is already open. Do not wrap it in
     powershell -ExecutionPolicy Bypass -c "...": a second powershell.exe with
@@ -13,28 +13,32 @@
     Trojan:Win32/Commando.A!ml, and it refuses to start it.
 
     You do not need Python. The script downloads uv, a single-file Python
-    manager, and uv downloads the exact Python HeySpeaky is tested on into the
+    manager, and uv downloads the exact Python SpeakIt is tested on into the
     install folder. Whatever Python you already have is never used: none,
     3.13, the Microsoft Store one and conda all behave the same.
 
     With your OpenAI key in the command, it checks the key with OpenAI, saves
     it, takes it back out of the PowerShell history file, and uses OpenAI:
 
-        $env:OPENAI_API_KEY = "sk-..."; irm https://raw.githubusercontent.com/Maslitsa/HeySpeaky/main/install.ps1 | iex
+        $env:OPENAI_API_KEY = "sk-..."; irm https://raw.githubusercontent.com/Maslitsa/SpeakIt/main/install.ps1 | iex
 
     Without one, a fresh install asks whether to transcribe with OpenAI or on
     this computer, and takes the key there. Updates do not ask again.
 
-    To remove HeySpeaky, use uninstall.ps1.
+    To remove SpeakIt, use uninstall.ps1.
 
     Run it again to update. config.json and the speech models are kept.
 
+    SpeakIt was called HeySpeaky for a while. The first run over a HeySpeaky
+    carries its settings, its OpenAI key and its dictionary across, removes
+    its shortcuts, and leaves its folder where it was for you to delete.
+
     If it fails, the window stays open, the last lines say why, and the whole
-    run is in %TEMP%\HeySpeaky-install.log.
+    run is in %TEMP%\SpeakIt-install.log.
 
 .PARAMETER InstallDir
     Where to install when downloading. Defaults to
-    %LOCALAPPDATA%\Programs\HeySpeaky. Ignored when this script is run from a
+    %LOCALAPPDATA%\Programs\SpeakIt. Ignored when this script is run from a
     copy of the project, which installs that copy.
 
 .PARAMETER Backend
@@ -48,15 +52,15 @@
     Set everything up but do not launch the app.
 
 .PARAMETER NoAutostart
-    Do not start HeySpeaky when you sign in.
+    Do not start SpeakIt when you sign in.
 
 .PARAMETER NoGame
     Do not open the window with the progress bar and the dinosaur game.
 
 .EXAMPLE
     # Arguments with the one-command install:
-    $s = [scriptblock]::Create((irm https://raw.githubusercontent.com/Maslitsa/HeySpeaky/main/install.ps1))
-    & $s -InstallDir 'D:\Apps\HeySpeaky'
+    $s = [scriptblock]::Create((irm https://raw.githubusercontent.com/Maslitsa/SpeakIt/main/install.ps1))
+    & $s -InstallDir 'D:\Apps\SpeakIt'
     & $s -Backend local
 
 .EXAMPLE
@@ -95,12 +99,12 @@ try {
     [Threading.Thread]::CurrentThread.CurrentUICulture = [Globalization.CultureInfo]::GetCultureInfo('en-US')
 } catch {}
 
-$AppName      = 'HeySpeaky'
-$RepoUrl      = 'https://github.com/Maslitsa/HeySpeaky'
-$RawInstaller = 'https://raw.githubusercontent.com/Maslitsa/HeySpeaky/main/install.ps1'
+$AppName      = 'SpeakIt'
+$RepoUrl      = 'https://github.com/Maslitsa/SpeakIt'
+$RawInstaller = 'https://raw.githubusercontent.com/Maslitsa/SpeakIt/main/install.ps1'
 $KeysPage     = 'https://platform.openai.com/api-keys'
 # Lets a branch be tried before it reaches main.
-$Ref          = if ($env:HEYSPEAKY_REF) { $env:HEYSPEAKY_REF } else { 'main' }
+$Ref          = if ($env:SPEAKIT_REF) { $env:SPEAKIT_REF } else { 'main' }
 
 # uv is pinned, and checked against the SHA-256 published with that release,
 # because the installer runs it.
@@ -118,11 +122,19 @@ $MinFreeGB = 3
 # are enabled, and a failure there surfaces as an unrelated build error.
 $MaxRootLength = 90
 
-# The app was VoiceType, then SpeakIt, now HeySpeaky. Newest first.
-$LegacyNames = @('SpeakIt', 'VoiceType')
-$LogFile    = Join-Path $env:TEMP 'HeySpeaky-install.log'
+# The app was VoiceType, then SpeakIt, then HeySpeaky, and is SpeakIt again.
+# The names it no longer uses, newest first.
+$LegacyNames = @('HeySpeaky', 'VoiceType')
+# The name just before this one, whose copy is the one people actually use.
+# HeySpeaky's installer left the SpeakIt from before it where it was, so a
+# SpeakIt folder next to a working HeySpeaky is the older of the two.
+$Previous    = 'HeySpeaky'
+# Left in the HeySpeaky folder once it has been carried across, so the next
+# update does not carry it again over everything changed since.
+$CarriedNote = 'MOVED-TO-SPEAKIT.txt'
+$LogFile    = Join-Path $env:TEMP 'SpeakIt-install.log'
 # Read by the progress window, tools\install_game.py.
-$ProgressFile = Join-Path $env:TEMP 'HeySpeaky-progress.json'
+$ProgressFile = Join-Path $env:TEMP 'SpeakIt-progress.json'
 
 # Shared with the functions below by changing their contents: a function that
 # assigns a variable gets its own copy.
@@ -214,7 +226,7 @@ $VenvDir     = [IO.Path]::Combine($Root, '.venv')
 $VenvPy      = [IO.Path]::Combine($VenvDir, 'Scripts\python.exe')
 $VenvPyW     = [IO.Path]::Combine($VenvDir, 'Scripts\pythonw.exe')
 $EntryFile   = [IO.Path]::Combine($Root, 'run.py')
-$IconFile    = [IO.Path]::Combine($Root, 'heyspeaky.ico')
+$IconFile    = [IO.Path]::Combine($Root, 'speakit.ico')
 $ConfigFile  = [IO.Path]::Combine($Root, 'config.json')
 $StartupDir  = [Environment]::GetFolderPath('Startup')
 $ProgramsDir = [Environment]::GetFolderPath('Programs')
@@ -230,9 +242,10 @@ $MutexName   = "Global\$AppName.SingleInstance"
 # Stopping
 # ---------------------------------------------------------------------------
 
-function Stop-HeySpeaky {
-    # Matches run.py only when it belongs to HeySpeaky, or to VoiceType before
-    # the rename, so an unrelated Python script called run.py is left alone.
+function Stop-SpeakIt {
+    # Matches run.py only when it belongs to SpeakIt, or to HeySpeaky or
+    # VoiceType before it, so an unrelated Python script called run.py is
+    # left alone.
     $all = @(Get-CimInstance Win32_Process -Filter "Name = 'pythonw.exe' OR Name = 'python.exe'" -ErrorAction SilentlyContinue)
     if (-not $all) { return }
 
@@ -415,7 +428,7 @@ function Use-KeyFromCommand {
     $raw = [Environment]::GetEnvironmentVariable('OPENAI_API_KEY', 'Process')
     $kept = Get-KeptKey
     # A key that was already in the environment is not an instruction to
-    # switch to OpenAI on every update. HeySpeaky reads that one by itself.
+    # switch to OpenAI on every update. SpeakIt reads that one by itself.
     if (-not $raw -or $raw -eq $kept) { return 'none' }
     # Put the variable back the way it was before the command set it.
     [Environment]::SetEnvironmentVariable('OPENAI_API_KEY', $kept, 'Process')
@@ -443,7 +456,7 @@ function Use-KeyFromCommand {
 }
 
 function Write-KeyHint {
-    Write-Note 'To add one later: click the HeySpeaky icon in the tray, click'
+    Write-Note 'To add one later: click the SpeakIt icon in the tray, click'
     Write-Note '"Add your OpenAI key", paste it and press Save.'
 }
 
@@ -459,7 +472,7 @@ function Set-ApiKey {
         Save-ApiKey $key
     }
     Write-Note 'The key is read on every request, so there is nothing to restart.'
-    Write-Note 'To use it, click the HeySpeaky tray icon: Transcribed by > OpenAI.'
+    Write-Note 'To use it, click the SpeakIt tray icon: Transcribed by > OpenAI.'
 }
 
 function Select-Backend {
@@ -490,7 +503,7 @@ function Select-Backend {
 
     $pick = $Backend
     if ($pick -eq 'ask') {
-        Write-Step 'How should HeySpeaky turn your speech into text?'
+        Write-Step 'How should SpeakIt turn your speech into text?'
         Write-Host ''
         Write-Host '    1  OpenAI   (recommended)' -ForegroundColor Green
         Write-Host '       Much more accurate, especially in Russian and German, and the'
@@ -530,7 +543,7 @@ function Select-Backend {
     Write-Step 'Your OpenAI API key'
     $key = Read-ApiKey
     if (-not $key) {
-        Write-Note 'No key for now, so HeySpeaky starts on this computer.'
+        Write-Note 'No key for now, so SpeakIt starts on this computer.'
         Write-KeyHint
         return 'local'
     }
@@ -543,7 +556,7 @@ function Set-LocalModel {
     # laptop with no GPU: base answers in 1.2-1.7s, small takes 4-7s and
     # large-v3-turbo 17-19s, which is far too long to wait after a sentence.
     # With a CUDA card the big model is both fast and much better, so it wins.
-    $code = 'import sys; sys.path.insert(0, sys.argv[1]); from heyspeaky import config; from heyspeaky.hardware import resolve_hardware; c = config.load(); device, _ = resolve_hardware(''auto'', ''auto''); c[''model''][''final''] = ''large-v3-turbo'' if device == ''cuda'' else ''base''; config.save(c); print(''local model: '' + c[''model''][''final''])'
+    $code = 'import sys; sys.path.insert(0, sys.argv[1]); from speakit import config; from speakit.hardware import resolve_hardware; c = config.load(); device, _ = resolve_hardware(''auto'', ''auto''); c[''model''][''final''] = ''large-v3-turbo'' if device == ''cuda'' else ''base''; config.save(c); print(''local model: '' + c[''model''][''final''])'
     Invoke-Native 'Choosing the local model' $VenvPy @('-c', $code, $Root)
 }
 
@@ -552,7 +565,7 @@ function Set-ConfigBackend([string]$Value) {
     # installed, and config.save() writes the file exactly as the app does.
     # Single quotes in the Python: Windows PowerShell mangles double quotes
     # inside arguments passed to native programs.
-    $code = 'import sys; sys.path.insert(0, sys.argv[1]); from heyspeaky import config; c = config.load(); c[''transcription''][''backend''] = sys.argv[2]; config.save(c)'
+    $code = 'import sys; sys.path.insert(0, sys.argv[1]); from speakit import config; c = config.load(); c[''transcription''][''backend''] = sys.argv[2]; config.save(c)'
     Invoke-Native 'Saving your choice' $VenvPy @('-c', $code, $Root, $Value)
 }
 
@@ -562,7 +575,7 @@ function Set-ConfigBackend([string]$Value) {
 
 function Test-SafeToReplace([string]$Dir) {
     # The update deletes the old code before copying the new, so refuse any
-    # folder that is not already a HeySpeaky install.
+    # folder that is not already a SpeakIt install.
     if (-not (Test-Path -LiteralPath $Dir)) { return $true }
     if (-not (Get-ChildItem -LiteralPath $Dir -Force)) { return $true }
     return (Test-Path -LiteralPath (Join-Path $Dir 'run.py')) -and
@@ -571,18 +584,18 @@ function Test-SafeToReplace([string]$Dir) {
 
 function Get-Project {
     if (-not (Test-SafeToReplace $Root)) {
-        throw "$Root already exists and is not a HeySpeaky folder. Choose another with -InstallDir, or empty it."
+        throw "$Root already exists and is not a SpeakIt folder. Choose another with -InstallDir, or empty it."
     }
     $stamp = [Guid]::NewGuid().ToString('N').Substring(0, 8)
-    $zip = Join-Path $env:TEMP "HeySpeaky-$stamp.zip"
-    $tmp = Join-Path $env:TEMP "HeySpeaky-$stamp"
+    $zip = Join-Path $env:TEMP "SpeakIt-$stamp.zip"
+    $tmp = Join-Path $env:TEMP "SpeakIt-$stamp"
     try {
         Write-Note "from $RepoUrl ($Ref)"
         Invoke-WebRequest -Uri "$RepoUrl/archive/$Ref.zip" -OutFile $zip -UseBasicParsing
         Expand-Archive -LiteralPath $zip -DestinationPath $tmp -Force
         $inner = @(Get-ChildItem -LiteralPath $tmp -Directory)[0]
         if (-not $inner -or -not (Test-Path -LiteralPath (Join-Path $inner.FullName 'run.py'))) {
-            throw 'The download did not contain HeySpeaky.'
+            throw 'The download did not contain SpeakIt.'
         }
         New-Item -ItemType Directory -Force -Path $Root | Out-Null
         # Kept across updates. Everything else is replaced, so files removed
@@ -600,9 +613,133 @@ function Get-Project {
     }
 }
 
-function Move-FromOldNames {
-    # An update from either old name keeps the settings and the key, and takes
+function Get-ShortcutFolder([string]$Path) {
+    # The shortcuts start pythonw.exe with run.py as the argument, so the copy
+    # is wherever that run.py is.
+    if (-not (Test-Path -LiteralPath $Path)) { return $null }
+    try {
+        $shell = New-Object -ComObject WScript.Shell
+        $target = $shell.CreateShortcut($Path).Arguments.Trim().Trim('"')
+        if ($target -like '*run.py') { return Split-Path -Parent $target }
+    } catch {}
+    return $null
+}
+
+function Get-PreviousCopy {
+    # The HeySpeaky to carry across: where its Start menu shortcut points, or
+    # its usual folder. Not a git clone, not one already carried, and never
+    # this install itself. Asked before anything removes that shortcut.
+    $candidates = @(
+        (Get-ShortcutFolder (Join-Path (Join-Path $ProgramsDir $Previous) "$Previous.lnk")),
+        (Join-Path $env:LOCALAPPDATA "Programs\$Previous")
+    )
+    foreach ($dir in $candidates) {
+        if (-not $dir) { continue }
+        try { $full = [IO.Path]::GetFullPath($dir).TrimEnd('\') } catch { continue }
+        if ($full -eq $Root.TrimEnd('\')) { continue }
+        if ((Test-Path -LiteralPath (Join-Path $full 'run.py')) -and
+            (Test-Path -LiteralPath (Join-Path $full 'install.ps1')) -and
+            -not (Test-Path -LiteralPath (Join-Path $full '.git')) -and
+            -not (Test-Path -LiteralPath (Join-Path $full $CarriedNote))) {
+            return $full
+        }
+    }
+    return $null
+}
+
+function Move-Aside([string]$Path) {
+    # Never deleted: renamed where it is, with the time it was moved.
+    $aside = '{0}.old-{1}' -f $Path, (Get-Date -Format 'yyyyMMdd-HHmmss')
+    Move-Item -LiteralPath $Path -Destination $aside
+    Write-Note "kept the older $(Split-Path -Leaf $Path) as $aside"
+}
+
+function Move-OlderSettingsAside([string]$From) {
+    # A SpeakIt from before HeySpeaky, still in this folder. An update keeps
+    # config.json and logs, so its September settings would win over the
+    # HeySpeaky ones being carried across. They go to a folder beside it,
+    # and only if they really are the older ones.
+    if (-not $From) { return }
+    if (Test-Path -LiteralPath (Join-Path $Root '.git')) { return }
+    $carried = Join-Path $From 'config.json'
+    if (-not (Test-Path -LiteralPath $carried)) { return }
+    if ((Test-Path -LiteralPath $ConfigFile) -and
+        (Get-Item -LiteralPath $ConfigFile).LastWriteTimeUtc -ge (Get-Item -LiteralPath $carried).LastWriteTimeUtc) {
+        return
+    }
+    $old = @(@($ConfigFile, (Join-Path $Root 'logs')) | Where-Object { Test-Path -LiteralPath $_ })
+    if (-not $old) { return }
+    $aside = '{0}.old-{1}' -f $Root.TrimEnd('\'), (Get-Date -Format 'yyyyMMdd-HHmmss')
+    New-Item -ItemType Directory -Force -Path $aside | Out-Null
+    foreach ($item in $old) { Move-Item -LiteralPath $item -Destination $aside }
+    Write-Note "the settings of the SpeakIt from before $Previous are kept in $aside"
+}
+
+function Copy-PreviousKey([string]$OldConfig) {
+    # The key that copy actually used is the file its config.json names. A
+    # HeySpeaky that was a SpeakIt first names the SpeakIt folder, which is
+    # where its tray saved any new key, so there it already is.
+    $live = $null
+    try {
+        $named = (Get-Content -LiteralPath $OldConfig -Raw -Encoding UTF8 | ConvertFrom-Json).transcription.cloud.api_key_file
+        if ($named) {
+            $named = [Environment]::ExpandEnvironmentVariables($named)
+            if (Test-Path -LiteralPath $named) { $live = $named }
+        }
+    } catch {}
+    if (-not $live) {
+        $usual = Join-Path $env:APPDATA "$Previous\openai.key"
+        if (Test-Path -LiteralPath $usual) { $live = $usual }
+    }
+    if (-not $live) { return }
+    if ([IO.Path]::GetFullPath($live) -eq [IO.Path]::GetFullPath($KeyFile)) { return }
+    New-Item -ItemType Directory -Force -Path $KeyDir | Out-Null
+    if (Test-Path -LiteralPath $KeyFile) {
+        if ((Get-FileHash -LiteralPath $KeyFile).Hash -eq (Get-FileHash -LiteralPath $live).Hash) { return }
+        Move-Aside $KeyFile
+    }
+    Copy-Item -LiteralPath $live -Destination $KeyFile
+    & icacls $KeyFile /inheritance:r /grant:r "$($env:USERNAME):(R,W)" | Out-Null
+    Write-Note "kept your OpenAI key from $(Split-Path -Parent $live)"
+}
+
+function Copy-Previous([string]$From) {
+    Write-Step "Carrying your $Previous across"
+    $oldConfig = Join-Path $From 'config.json'
+    if ((Test-Path -LiteralPath $oldConfig) -and -not (Test-Path -LiteralPath $ConfigFile)) {
+        Copy-Item -LiteralPath $oldConfig -Destination $ConfigFile
+        Write-Note "kept your settings from $Previous"
+    }
+    # The dictionary, the spending tally, the update check and the sounds.
+    # HeySpeaky's are newer than anything a SpeakIt from before it left, so
+    # an older one is moved aside rather than kept.
+    $oldData = Join-Path $env:APPDATA $Previous
+    if (Test-Path -LiteralPath $oldData) {
+        New-Item -ItemType Directory -Force -Path $KeyDir | Out-Null
+        foreach ($item in @(Get-ChildItem -LiteralPath $oldData -Force)) {
+            if ($item.Name -eq 'openai.key') { continue }
+            $dest = Join-Path $KeyDir $item.Name
+            if (Test-Path -LiteralPath $dest) { Move-Aside $dest }
+            Copy-Item -LiteralPath $item.FullName -Destination $dest -Recurse
+            Write-Note "kept your $($item.Name) from $Previous"
+        }
+    }
+    Copy-PreviousKey $oldConfig
+    $note = @(
+        "This $Previous was carried across to $Root on $(Get-Date -Format 'yyyy-MM-dd'),",
+        'with its settings, its OpenAI key and its dictionary. SpeakIt is the',
+        'same program under its first name again. Delete this folder once',
+        'SpeakIt works.'
+    )
+    Set-Content -LiteralPath (Join-Path $From $CarriedNote) -Value $note -Encoding UTF8
+    Write-Note "the old $Previous folder is still at $From"
+    Write-Note 'delete it once SpeakIt works'
+}
+
+function Move-FromOldNames([string]$From) {
+    # An update from an old name keeps the settings and the key, and takes
     # the old shortcuts away so only one copy starts with Windows.
+    if ($From) { Copy-Previous $From }
     foreach ($old in $LegacyNames) {
         Remove-Shortcuts $old
         $oldDir = Join-Path $env:LOCALAPPDATA "Programs\$old"
@@ -618,9 +755,9 @@ function Move-FromOldNames {
             & icacls $KeyFile /inheritance:r /grant:r "$($env:USERNAME):(R,W)" | Out-Null
             Write-Note "kept your OpenAI key from $old"
         }
-        if ((Test-Path -LiteralPath $oldDir) -and ($oldDir -ne $Root)) {
+        if ((Test-Path -LiteralPath $oldDir) -and ($oldDir -ne $Root) -and ($oldDir -ne $From)) {
             Write-Note "the old $old folder is still at $oldDir"
-            Write-Note 'delete it once HeySpeaky works'
+            Write-Note 'delete it once SpeakIt works'
         }
     }
 }
@@ -640,21 +777,21 @@ function Test-LongPathsEnabled {
 
 function Assert-CanInstall {
     if ([Environment]::OSVersion.Version.Major -lt 10) {
-        throw 'HeySpeaky needs Windows 10 or 11.'
+        throw 'SpeakIt needs Windows 10 or 11.'
     }
     if ($PSVersionTable.PSVersion.Major -lt 5) {
-        throw 'HeySpeaky needs PowerShell 5 or newer, which ships with Windows 10.'
+        throw 'SpeakIt needs PowerShell 5 or newer, which ships with Windows 10.'
     }
     if (-not [Environment]::Is64BitOperatingSystem) {
-        throw 'HeySpeaky needs 64-bit Windows. PyTorch has no 32-bit build.'
+        throw 'SpeakIt needs 64-bit Windows. PyTorch has no 32-bit build.'
     }
     if ($Root.Length -gt $MaxRootLength -and -not (Test-LongPathsEnabled)) {
-        throw ("The install folder path is too long ({0} characters, the limit is {1} on this PC):`n  {2}`nUse a shorter one, for example:  & `$s -InstallDir 'C:\HeySpeaky'" -f $Root.Length, $MaxRootLength, $Root)
+        throw ("The install folder path is too long ({0} characters, the limit is {1} on this PC):`n  {2}`nUse a shorter one, for example:  & `$s -InstallDir 'C:\SpeakIt'" -f $Root.Length, $MaxRootLength, $Root)
     }
     # Checked here rather than when downloading, so a folder that cannot be
     # used fails the install before anything running has been stopped.
     if (-not $SelfPath -and -not (Test-SafeToReplace $Root)) {
-        throw "$Root already exists and is not a HeySpeaky folder. Choose another with -InstallDir, or empty it."
+        throw "$Root already exists and is not a SpeakIt folder. Choose another with -InstallDir, or empty it."
     }
     if ($Root -like '*\OneDrive*') {
         Write-Warning "$Root is inside OneDrive, which will try to sync about a gigabyte of packages. A folder outside it is better."
@@ -667,13 +804,13 @@ function Assert-CanInstall {
         $drive = New-Object IO.DriveInfo ($driveRoot)
         $freeGB = $drive.AvailableFreeSpace / 1GB
         if ($freeGB -lt $MinFreeGB) {
-            throw ("Only {0:N1} GB free on {1}. HeySpeaky needs about {2} GB." -f $freeGB, $drive.Name, $MinFreeGB)
+            throw ("Only {0:N1} GB free on {1}. SpeakIt needs about {2} GB." -f $freeGB, $drive.Name, $MinFreeGB)
         }
     }
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = New-Object Security.Principal.WindowsPrincipal($identity)
     if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-        Write-Warning "This window is running as administrator. HeySpeaky will be set up for the account '$($env:USERNAME)'. If that is not the account you use every day, close this window and run the command in a normal one."
+        Write-Warning "This window is running as administrator. SpeakIt will be set up for the account '$($env:USERNAME)'. If that is not the account you use every day, close this window and run the command in a normal one."
     }
 }
 
@@ -696,10 +833,10 @@ function Confirm-VCRuntime {
         # 1638: a newer version is already there. 3010: installed, and a
         # restart is recommended but not needed for this.
         if (@(0, 1638, 3010) -notcontains $p.ExitCode) {
-            Write-Warning "The runtime installer exited with $($p.ExitCode). If HeySpeaky fails to start, install it by hand: $url"
+            Write-Warning "The runtime installer exited with $($p.ExitCode). If SpeakIt fails to start, install it by hand: $url"
         }
     } catch {
-        Write-Warning "Skipped: $($_.Exception.Message). If HeySpeaky fails to start, install it by hand: $url"
+        Write-Warning "Skipped: $($_.Exception.Message). If SpeakIt fails to start, install it by hand: $url"
     } finally {
         Remove-Item -LiteralPath $exe -Force -ErrorAction SilentlyContinue
     }
@@ -826,7 +963,7 @@ function New-Shortcut([string]$Path) {
     $sc.Arguments        = '"{0}"' -f $EntryFile
     $sc.WorkingDirectory = $Root
     $sc.WindowStyle      = 7
-    $sc.Description      = 'HeySpeaky - hold Ctrl+Alt to dictate'
+    $sc.Description      = 'SpeakIt - hold Ctrl+Alt to dictate'
     # Its own icon. The Python it starts has none, and the Start menu showed
     # a blank window for it.
     if (Test-Path -LiteralPath $IconFile) {
@@ -867,13 +1004,13 @@ function Read-LogSince([string]$Path, [long]$Offset) {
     }
 }
 
-function Start-HeySpeaky {
-    $log = Join-Path $Root 'logs\heyspeaky.log'
+function Start-SpeakIt {
+    $log = Join-Path $Root 'logs\speakit.log'
     $offset = 0
     if (Test-Path -LiteralPath $log) { $offset = (Get-Item -LiteralPath $log).Length }
     $proc = Start-Process -FilePath $VenvPyW -ArgumentList ('"{0}"' -f $EntryFile) -WorkingDirectory $Root -PassThru
 
-    # HeySpeaky loads its speech engine as it starts and logs the result, so
+    # SpeakIt loads its speech engine as it starts and logs the result, so
     # waiting for that line checks the engine without loading it a second
     # time. The first start after installing is slow: every file is new to
     # Python and PyTorch comes off a cold disk, 29 seconds on a fast laptop
@@ -892,16 +1029,16 @@ function Start-HeySpeaky {
         if ($new -match $broken -or $proc.HasExited) { break }
     }
     if ($new -match 'Another instance is already running') {
-        Write-Warning 'Another copy of HeySpeaky was already running, so that one stays. Quit it from the tray and start HeySpeaky from the Start Menu to use this one.'
+        Write-Warning 'Another copy of SpeakIt was already running, so that one stays. Quit it from the tray and start SpeakIt from the Start Menu to use this one.'
         return
     }
     if (-not $proc.HasExited -and $new -notmatch $broken) {
-        Write-Warning "HeySpeaky is still loading (PID $($proc.Id)). If the tray icon does not say Ready within a few minutes, double-click CHECKUP.bat in $Root."
+        Write-Warning "SpeakIt is still loading (PID $($proc.Id)). If the tray icon does not say Ready within a few minutes, double-click CHECKUP.bat in $Root."
         return
     }
 
     Write-Host ''
-    Write-Host '    what HeySpeaky logged' -ForegroundColor Yellow
+    Write-Host '    what SpeakIt logged' -ForegroundColor Yellow
     @($new -split "`r?`n" | Where-Object { $_ }) | Select-Object -Last 15 | ForEach-Object { Write-Note $_ }
     $stdout = Join-Path $Root 'logs\stdout.log'
     if ((Test-Path -LiteralPath $stdout) -and (Get-Item -LiteralPath $stdout).Length -gt 0) {
@@ -909,9 +1046,9 @@ function Start-HeySpeaky {
         Get-Content -LiteralPath $stdout -Tail 15 | ForEach-Object { Write-Note $_ }
     }
     if ($proc.HasExited) {
-        throw 'HeySpeaky installed but did not start. The log lines above say why.'
+        throw 'SpeakIt installed but did not start. The log lines above say why.'
     }
-    throw 'HeySpeaky started, but its speech engine did not load. The log lines above say why.'
+    throw 'SpeakIt started, but its speech engine did not load. The log lines above say why.'
 }
 
 # ---------------------------------------------------------------------------
@@ -921,19 +1058,22 @@ function Start-HeySpeaky {
 function Invoke-Install {
     Assert-CanInstall
     $Progress.Plan = Get-InstallPlan
+    $from = Get-PreviousCopy
+    if ($from) { Write-Log "    carrying across $from" }
 
     Write-Step 'Stopping any running copy'
-    Stop-HeySpeaky
+    Stop-SpeakIt
+    Move-OlderSettingsAside $from
 
     if (-not $SelfPath) {
-        Write-Step "Downloading HeySpeaky into $Root"
-        Set-Progress 'project' 'Downloading HeySpeaky'
+        Write-Step "Downloading SpeakIt into $Root"
+        Set-Progress 'project' 'Downloading SpeakIt'
         Get-Project
     }
     if (-not (Test-Path -LiteralPath $EntryFile)) {
-        throw "run.py is not in $Root. Run this script from inside the HeySpeaky folder."
+        throw "run.py is not in $Root. Run this script from inside the SpeakIt folder."
     }
-    Move-FromOldNames
+    Move-FromOldNames $from
 
     $choice = Select-Backend
 
@@ -950,7 +1090,7 @@ function Invoke-Install {
     $uv = Get-Uv
 
     if (-not (Test-Venv)) {
-        Write-Step 'Getting Python 3.12 for HeySpeaky (your own Python is not touched)'
+        Write-Step 'Getting Python 3.12 for SpeakIt (your own Python is not touched)'
         Set-Progress 'python' 'Getting Python'
         Invoke-Native 'Creating the environment' $uv @('venv', '--clear', '--managed-python', '--python', $PythonRequest, $VenvDir)
     }
@@ -975,7 +1115,7 @@ function Invoke-Install {
     Write-Step 'Checking the install and downloading the speech model'
     Set-Progress 'models' 'Downloading the speech model'
     $check = @((Join-Path $Root 'tools\doctor.py'), '--install')
-    # Starting HeySpeaky below loads the engine and checks it, so loading it
+    # Starting SpeakIt below loads the engine and checks it, so loading it
     # here as well would only double the wait. -NoStart still checks it here.
     if (-not $NoStart) { $check += '--no-engine' }
     Invoke-Native 'The check' $VenvPy $check
@@ -984,7 +1124,7 @@ function Invoke-Install {
     try {
         Invoke-Native 'Drawing the icon' $VenvPy @((Join-Path $Root 'tools\make_icon.py'), $IconFile)
     } catch {
-        # A shortcut with a plain icon still starts HeySpeaky.
+        # A shortcut with a plain icon still starts SpeakIt.
         Write-Note 'The icon could not be drawn; the shortcuts get a plain one.'
     }
     if ($NoAutostart) {
@@ -998,9 +1138,9 @@ function Invoke-Install {
     New-Shortcut $MenuLnk
 
     if (-not $NoStart) {
-        Write-Step 'Starting HeySpeaky'
-        Set-Progress 'start' 'Starting HeySpeaky'
-        Start-HeySpeaky
+        Write-Step 'Starting SpeakIt'
+        Set-Progress 'start' 'Starting SpeakIt'
+        Start-SpeakIt
     }
     Complete-StepTime
     Complete-Progress 'done'
@@ -1017,7 +1157,7 @@ function Invoke-Install {
 
     Write-Host ''
     Write-Host '--------------------------------------------------------------' -ForegroundColor Green
-    Write-Host ' HeySpeaky is installed.' -ForegroundColor Green
+    Write-Host ' SpeakIt is installed.' -ForegroundColor Green
     Write-Host '--------------------------------------------------------------' -ForegroundColor Green
     Write-Host @"
 
@@ -1031,7 +1171,7 @@ function Invoke-Install {
   Autostart        $autoState
   Folder           $Root
 
-  Everything else is in the HeySpeaky icon in the tray - click it:
+  Everything else is in the SpeakIt icon in the tray - click it:
     Language, +          the languages you speak (just type to find one)
     Transcribed by       OpenAI or this computer
     OpenAI key           click it, paste your key, Save
@@ -1060,7 +1200,7 @@ try {
         [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     } catch {}
 
-    Set-Content -LiteralPath $LogFile -Value "HeySpeaky installer, $(Get-Date -Format s)" -Encoding UTF8
+    Set-Content -LiteralPath $LogFile -Value "SpeakIt installer, $(Get-Date -Format s)" -Encoding UTF8
     Write-Log ("PowerShell {0} | {1} | {2} | root {3}" -f $PSVersionTable.PSVersion, [Environment]::OSVersion.VersionString, $env:PROCESSOR_ARCHITECTURE, $Root)
 
     if ($SetApiKey) {
@@ -1074,7 +1214,7 @@ try {
     Write-Log "FAILED: $($_.Exception.Message)"
     Write-Log "$($_.ScriptStackTrace)"
     Write-Host ''
-    Write-Host 'HeySpeaky was not installed.' -ForegroundColor Red
+    Write-Host 'SpeakIt was not installed.' -ForegroundColor Red
     Write-Host "  $($_.Exception.Message)" -ForegroundColor Red
     Write-Host ''
     Write-Host "  Full log: $LogFile"
