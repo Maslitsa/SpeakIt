@@ -2687,7 +2687,14 @@ class TypingInTheLayoutInUse(unittest.TestCase):
         layout = self.kazakh()
         typed = "".join(keymap.typed_char(code, layout)
                         for code in (0x33, 0x34, 0x35, 0x38, 0x30))
-        self.assertEqual(typed, "іңғүқ")
+        expected = "іңғүқ"
+        # The keyboard's own state is read, as it is when somebody types,
+        # so with Caps Lock on the same keys type capitals. This failed on
+        # the owner's laptop for nothing more than that.
+        import ctypes
+        if ctypes.windll.user32.GetKeyState(0x14) & 1:
+            expected = expected.upper()
+        self.assertEqual(typed, expected)
 
     def test_keys_that_are_not_text_type_nothing(self):
         layout = self.kazakh()
